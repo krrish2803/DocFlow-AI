@@ -1,0 +1,249 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaces    Membership[]
+  reviews       Review[]
+  auditLogs     AuditLog[]
+  assignments   ReviewAssignment[]
+  conversations ChatConversation[]
+}
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  aiApiKey    String?
+  aiProvider  String   @default("nvidia")
+  aiModel     String   @default("meta/llama-3.1-8b-instruct")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members     Membership[]
+  sources     SourceConnection[]
+  documents   GeneratedDocument[]
+  jobs        GenerationJob[]
+  apiKeys     ApiKey[]
+  auditLogs   AuditLog[]
+  conversations ChatConversation[]
+}
+
+model Membership {
+  id          String @id @default(cuid())
+  role        String @default("MEMBER")
+  userId      String
+  workspaceId String
+  user        User      @relation(fields: [userId], references: [id])
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  @@unique([userId, workspaceId])
+}
+
+model SourceConnection {
+  id            String   @id @default(cuid())
+  sourceType    String
+  label         String
+  status        String   @default("connected")
+  lastSyncAt    DateTime?
+  contentVolume Int      @default(0)
+  repositoryUrl String?
+  token         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  files       RepoFile[]
+  docSources  DocSourceLink[]
+  jobSources  JobSourceLink[]
+}
+
+model RepoFile {
+  id         String   @id @default(cuid())
+  path       String
+  content    String   @default("")
+  sha        String?
+  syncAt     DateTime @default(now())
+
+  sourceId String
+  source   SourceConnection @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  docLinks DocSourceLink[]
+
+  @@unique([sourceId, path])
+}
+
+model GeneratedDocument {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String
+  description String?
+  content     String   @default("")
+  status      String   @default("DRAFT")
+  docType     String   @default("readme")
+  version     Int      @default(1)
+  isPublished Boolean  @default(false)
+  sourceHash  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  versions    DocumentVersion[]
+  reviews     Review[]
+  docSources  DocSourceLink[]
+  reviewAssignments ReviewAssignment[]
+}
+
+model DocumentVersion {
+  id              String            @id @default(cuid())
+  version         Int
+  title           String
+  content         String
+  description     String?
+  createdAt       DateTime          @default(now())
+  documentId      String
+  document        GeneratedDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, version])
+  @@index([documentId])
+}
+
+model GenerationJob {
+  id        String   @id @default(cuid())
+  type      String
+  status    String   @default("QUEUED")
+  progress  Int      @default(0)
+  message   String?
+  triggerType String @default("MANUAL")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  resultDocumentId String?
+  jobSources       JobSourceLink[]
+}
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  label       String
+  key         String   @unique
+  prefix      String
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  isRevoked   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  @@index([workspaceId])
+}
+
+model Review {
+  id          String   @id @default(cuid())
+  status      String   @default("PENDING")
+  comment     String?
+  sectionIdx  Int?
+  sectionLabel String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  documentId  String
+  document    GeneratedDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  reviewerId  String
+  reviewer    User @relation(fields: [reviewerId], references: [id])
+}
+
+model ReviewAssignment {
+  id          String   @id @default(cuid())
+  status      String   @default("PENDING")
+  createdAt   DateTime @default(now())
+
+  documentId  String
+  document    GeneratedDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  assigneeId  String
+  assignee    User @relation(fields: [assigneeId], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  entityType String
+  entityId  String
+  details   String?
+  createdAt DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  userId      String?
+  user        User? @relation(fields: [userId], references: [id])
+}
+
+model DocSourceLink {
+  id          String   @id @default(cuid())
+  fileContentHash String
+  lastCheckedAt   DateTime @default(now())
+  stale           Boolean  @default(false)
+
+  documentId String
+  document   GeneratedDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sourceFileId String
+  sourceFile   RepoFile @relation(fields: [sourceFileId], references: [id], onDelete: Cascade)
+  sourceId     String
+  source       SourceConnection @relation(fields: [sourceId], references: [id])
+
+  @@unique([documentId, sourceFileId])
+}
+
+model JobSourceLink {
+  id          String   @id @default(cuid())
+  filePath    String
+  fileContent String
+
+  jobId    String
+  job      GenerationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  sourceId String
+  source   SourceConnection @relation(fields: [sourceId], references: [id])
+}
+
+model ChatConversation {
+  id        String   @id @default(cuid())
+  title     String   @default("New conversation")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  messages    ChatMessage[]
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  role      String
+  content   String
+  citations String?
+  createdAt DateTime @default(now())
+
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
